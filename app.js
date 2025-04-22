@@ -11,10 +11,71 @@ app.use(express.json());
 app.use(cors());
 
 const port = 7000;
+
 let client = null;
 let venomReady = false;
 
-// Rota para servir o QR Code
+// Criar servidor HTTP e socket
+const server = http.createServer(app);
+const io = socketIo(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+server.listen(port, () => {
+    console.log(`API rodando na porta ${port}`);
+});
+
+// 🔁 Função de inicialização e reconexão do Venom
+function startVenom() {
+    venom.create({
+        session: 'session-name',
+        headless: 'new',
+        catchQR: (qrCode) => {
+            console.log('QR Code gerado. Salvando o arquivo PNG...');
+            const base64Image = qrCode.replace(/^data:image\/png;base64,/, "");
+            fs.writeFile(path.join(__dirname, 'qrcode.png'), base64Image, 'base64', (err) => {
+                if (err) {
+                    console.error('Erro ao salvar QR:', err);
+                } else {
+                    console.log('QR Code salvo como qrcode.png');
+                }
+            });
+        },
+    }).then((venomClient) => {
+        client = venomClient;
+        venomReady = true;
+
+        // Apagar o QR após conectar
+        const qrPath = path.join(__dirname, 'qrcode.png');
+        if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+
+        console.log("✅ Venom conectado!");
+        io.emit("status", "✅ Conectado ao WhatsApp!");
+
+        // Detectar se perdeu conexão depois de conectado
+        client.onStateChange((state) => {
+            console.log(`📡 Estado do WhatsApp: ${state}`);
+            if (["UNPAIRED", "UNPAIRED_IDLE", "CONFLICT", "DISCONNECTED"].includes(state)) {
+                console.log("⚠️ Venom desconectado, tentando reconectar...");
+                venomReady = false;
+                client = null;
+                setTimeout(startVenom, 5000);
+            }
+        });
+
+    }).catch((err) => {
+        console.error("❌ Erro ao iniciar o Venom:", err);
+        io.emit("status", "❌ Erro ao iniciar sessão do WhatsApp. Tentando novamente...");
+        venomReady = false;
+        client = null;
+        setTimeout(startVenom, 5000);
+    });
+}
+
+// Inicia a primeira vez
+startVenom();
+
+// Rota para exibir o QR code
 app.get("/qrcode", (req, res) => {
     const qrPath = path.join(__dirname, "qrcode.png");
     if (fs.existsSync(qrPath)) {
@@ -24,50 +85,9 @@ app.get("/qrcode", (req, res) => {
     }
 });
 
-// Criar servidor HTTP e socket
-const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
-// Iniciar o servidor Express imediatamente
-server.listen(port, () => {
-    console.log(`API rodando na porta ${port}`);
-});
-
-// Inicia a sessão do Venom após servidor estar no ar
-venom.create({
-    session: 'session-name',
-    headless: 'new',
-    catchQR: (qrCode) => {
-        console.log('QR Code gerado. Salvando o arquivo PNG...');
-        const base64Image = qrCode.replace(/^data:image\/png;base64,/, "");
-        fs.writeFile(path.join(__dirname, 'qrcode.png'), base64Image, 'base64', (err) => {
-            if (err) {
-                console.error('Erro ao salvar QR:', err);
-            } else {
-                console.log('QR Code salvo como qrcode.png');
-            }
-        });
-    },
-}).then((venomClient) => {
-    client = venomClient;
-    venomReady = true;
-
-    // Deleta o QR depois de conectar
-    const qrPath = path.join(__dirname, 'qrcode.png');
-    if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
-
-    console.log("✅ Venom conectado!");
-}).catch((err) => {
-    console.error("Erro ao iniciar o Venom:", err);
-});
-
-// Endpoint de envio
+// Endpoint de envio sequencial
 app.post('/send-sequencial', async (req, res) => {
-    const { to, messages } = req.body;
-    const minDelay = req.body.minDelay || 3; // em minutos
-    const maxDelay = req.body.maxDelay || 5;
+    const { to, messages, minDelay = 3, maxDelay = 5 } = req.body;
 
     if (!venomReady || !client) {
         return res.status(500).json({ error: "Venom ainda não está conectado." });
@@ -76,7 +96,7 @@ app.post('/send-sequencial', async (req, res) => {
     if (!Array.isArray(to) || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Parâmetros inválidos. Esperado: { to: [], messages: [] }" });
     }
-
+//ok
     res.json({ success: true, message: "Envio iniciado em background" });
 
     (async () => {

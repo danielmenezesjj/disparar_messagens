@@ -96,7 +96,7 @@ app.post('/send-sequencial', async (req, res) => {
     if (!Array.isArray(to) || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Parâmetros inválidos. Esperado: { to: [], messages: [] }" });
     }
-//ok
+    //ok
     res.json({ success: true, message: "Envio iniciado em background" });
 
     (async () => {
@@ -105,7 +105,6 @@ app.post('/send-sequencial', async (req, res) => {
             const recipient = `${number}@c.us`;
 
             const message = messages[Math.floor(Math.random() * messages.length)];
-
             let success = false;
 
             try {
@@ -121,11 +120,21 @@ app.post('/send-sequencial', async (req, res) => {
             }
 
             if (success && i < to.length - 1) {
+                // Pausa padrão (minDelay/maxDelay)
                 const delayTime = Math.floor(Math.random() * (maxDelay - minDelay + 1) + minDelay) * 60 * 1000;
                 const delayLog = `⏱️ Próxima mensagem em: ${Math.floor(delayTime / 1000)}s`;
                 console.log(delayLog);
                 io.emit("status", delayLog);
                 await new Promise(resolve => setTimeout(resolve, delayTime));
+
+                // A cada 20 mensagens enviadas com sucesso, pausa longa
+                if ((i + 1) % 21 === 0) {
+                    const longPause = Math.floor(Math.random() * (30 - 20 + 1) + 20) * 60 * 1000;
+                    const longPauseLog = `⏸️ Pausa programada após ${i + 1} envios: aguardando ${Math.floor(longPause / 60000)} minutos...`;
+                    console.log(longPauseLog);
+                    io.emit("status", longPauseLog);
+                    await new Promise(resolve => setTimeout(resolve, longPause));
+                }
             }
         }
 
